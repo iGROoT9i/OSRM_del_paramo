@@ -1,28 +1,34 @@
-# 1. Usar la imagen oficial de OSRM
-FROM osrm/osrm-backend:latest
+# Etapa 1: Descargar y recortar el mapa usando una imagen moderna
+FROM debian:bullseye-slim AS builder
 
-# 2. Instalar dependencias para procesar el mapa
+# Instalar wget y osmium-tool
 RUN apt-get update && \
-    apt-get install -y osmium-tool && \
+    apt-get install -y osmium-tool wget && \
     rm -rf /var/lib/apt/lists/*
 
-# 3. Crear y definir el directorio de trabajo
 WORKDIR /data
 
-# 4. Descargar el mapa de todo Perú
-ADD http://download.geofabrik.de/south-america/peru-latest.osm.pbf /data/peru-latest.osm.pbf
+# Descargar el mapa de Perú
+RUN wget -q http://download.geofabrik.de/south-america/peru-latest.osm.pbf -O peru-latest.osm.pbf
 
-# 5. Recortar el mapa SÓLO para la zona de Iquitos y procesar OSRM en la misma capa
-# Bounding box para Iquitos y alrededores aprox: -73.5, -4.0, -73.0, -3.5 (min_lon, min_lat, max_lon, max_lat)
-RUN osmium extract -b -73.5,-4.0,-73.0,-3.5 peru-latest.osm.pbf -o iquitos.osm.pbf && \
-    rm peru-latest.osm.pbf && \
-    osrm-extract -p /opt/car.lua iquitos.osm.pbf && \
+# Recortar el mapa a la zona de Iquitos
+RUN osmium extract -b -73.5,-4.0,-73.0,-3.5 peru-latest.osm.pbf -o iquitos.osm.pbf
+
+# Etapa 2: Procesar y servir con OSRM
+FROM osrm/osrm-backend:latest
+
+WORKDIR /data
+
+# Copiar solo el mapa pequeño de Iquitos desde la etapa 1
+COPY --from=builder /data/iquitos.osm.pbf /data/iquitos.osm.pbf
+
+# Compilar los datos de enrutamiento
+RUN osrm-extract -p /opt/car.lua iquitos.osm.pbf && \
     osrm-partition iquitos.osrm && \
     osrm-customize iquitos.osrm && \
     rm iquitos.osm.pbf
 
-# 6. Exponer el puerto interno del contenedor
 EXPOSE 5000
 
-# 7. Comando para arrancar el servidor con el mapa optimizado de Iquitos
+# Arrancar el servidor
 CMD ["osrm-routed", "--algorithm", "mld", "iquitos.osrm"]
