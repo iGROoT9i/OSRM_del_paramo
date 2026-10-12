@@ -1,0 +1,4 @@
+.git
+*.osm.pbf
+*.osrm*
+__pycache__/
